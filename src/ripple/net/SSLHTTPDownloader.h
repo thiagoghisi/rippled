@@ -40,9 +40,8 @@
 namespace ripple {
 
 /** Provides an asynchronous HTTPS file downloader
-*/
+ */
 class SSLHTTPDownloader
-    : public std::enable_shared_from_this <SSLHTTPDownloader>
 {
 public:
     using error_code = boost::system::error_code;
@@ -61,13 +60,36 @@ public:
         boost::filesystem::path const& dstPath,
         std::function<void(boost::filesystem::path)> complete);
 
+    void
+    onStop();
+
+    virtual ~SSLHTTPDownloader() = default;
+
+protected:
+    using parser = boost::beast::http::basic_parser<false>;
+
+    beast::Journal const j_;
+
+    void
+    fail(
+        boost::filesystem::path dstPath,
+        std::function<void(boost::filesystem::path)> const& complete,
+        boost::system::error_code const& ec,
+        std::string const& errMsg,
+        std::shared_ptr<parser> parser);
+
 private:
     HTTPClientSSLContext ssl_ctx_;
     boost::asio::io_service::strand strand_;
-    boost::optional<
-        boost::asio::ssl::stream<boost::asio::ip::tcp::socket>> stream_;
+    boost::optional<boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>
+        stream_;
     boost::beast::flat_buffer read_buf_;
-    beast::Journal const j_;
+    std::atomic<bool> cancelDownloads_;
+
+    // Used to protect sessionActive_
+    std::mutex m_;
+    bool sessionActive_;
+    std::condition_variable c_;
 
     void
     do_session(
@@ -79,14 +101,22 @@ private:
         std::function<void(boost::filesystem::path)> complete,
         boost::asio::yield_context yield);
 
-    void
-    fail(
+    virtual std::shared_ptr<parser>
+    getParser(
         boost::filesystem::path dstPath,
-        std::function<void(boost::filesystem::path)> const& complete,
-        boost::system::error_code const& ec,
-        std::string const& errMsg);
+        std::function<void(boost::filesystem::path)> complete,
+        boost::system::error_code& ec) = 0;
+
+    virtual bool
+    checkPath(boost::filesystem::path const& dstPath) = 0;
+
+    virtual void
+    closeBody(std::shared_ptr<parser> p) = 0;
+
+    virtual uint64_t
+    size(std::shared_ptr<parser> p) = 0;
 };
 
-} // ripple
+}  // namespace ripple
 
 #endif

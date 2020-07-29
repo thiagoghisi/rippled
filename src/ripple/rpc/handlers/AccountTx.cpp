@@ -31,9 +31,8 @@
 #include <ripple/rpc/Context.h>
 #include <ripple/rpc/DeliveredAmount.h>
 #include <ripple/rpc/Role.h>
-#include <ripple/rpc/impl/RPCHelpers.h>
 #include <ripple/rpc/impl/GRPCHelpers.h>
-
+#include <ripple/rpc/impl/RPCHelpers.h>
 
 #include <grpcpp/grpcpp.h>
 
@@ -124,8 +123,9 @@ parseLedgerArgs(
         {
             if (uint256::size() != specifier.hash().size())
             {
-                grpc::Status errorStatus{grpc::StatusCode::INVALID_ARGUMENT,
-                                         "ledger hash malformed"};
+                grpc::Status errorStatus{
+                    grpc::StatusCode::INVALID_ARGUMENT,
+                    "ledger hash malformed"};
                 return errorStatus;
             }
             ledger = uint256::fromVoid(specifier.hash().data());
@@ -177,7 +177,7 @@ parseLedgerArgs(Json::Value const& params)
     {
         LedgerSpecifier ledger;
         if (params[jss::ledger_index].isNumeric())
-            ledger = params[jss::ledger_index].asInt();
+            ledger = params[jss::ledger_index].asUInt();
         else
         {
             std::string ledgerStr = params[jss::ledger_index].asString();
@@ -190,8 +190,8 @@ parseLedgerArgs(Json::Value const& params)
                 ledger = LedgerShortcut::VALIDATED;
             else
             {
-                RPC::Status status{rpcINVALID_PARAMS,
-                                   "ledger_index string malformed"};
+                RPC::Status status{
+                    rpcINVALID_PARAMS, "ledger_index string malformed"};
                 status.inject(response);
                 return response;
             }
@@ -214,7 +214,9 @@ getLedgerRange(
     if (!bValidated)
     {
         // Don't have a validated ledger range.
-        return rpcLGR_IDXS_INVALID;
+        if (context.apiVersion == 1)
+            return rpcLGR_IDXS_INVALID;
+        return rpcNOT_SYNCED;
     }
 
     std::uint32_t uLedgerMin = uValidatedMin;
@@ -236,7 +238,11 @@ getLedgerRange(
                         uLedgerMax = ls.max;
                     }
                     if (uLedgerMax < uLedgerMin)
-                        return rpcLGR_IDXS_INVALID;
+                    {
+                        if (context.apiVersion == 1)
+                            return rpcLGR_IDXS_INVALID;
+                        return rpcINVALID_LGR_RANGE;
+                    }
                 }
                 else
                 {
@@ -330,6 +336,10 @@ populateProtoResponse(
         {
             status = {grpc::StatusCode::NOT_FOUND, error.message()};
         }
+        else if (error.toErrorCode() == rpcNOT_SYNCED)
+        {
+            status = {grpc::StatusCode::FAILED_PRECONDITION, error.message()};
+        }
         else
         {
             status = {grpc::StatusCode::INVALID_ARGUMENT, error.message()};
@@ -373,19 +383,21 @@ populateProtoResponse(
                             closeTime->time_since_epoch().count());
                     if (txnMeta)
                     {
-                        if (!txnMeta->hasDeliveredAmount())
+                        RPC::convert(*txnProto->mutable_meta(), txnMeta);
+                        if (!txnProto->meta().has_delivered_amount())
                         {
-                            std::optional<STAmount> amount = getDeliveredAmount(
-                                context,
-                                txn->getSTransaction(),
-                                *txnMeta,
-                                txn->getLedger());
-                            if (amount)
+                            if (auto amt = getDeliveredAmount(
+                                    context,
+                                    txn->getSTransaction(),
+                                    *txnMeta,
+                                    txn->getLedger()))
                             {
-                                txnMeta->setDeliveredAmount(*amount);
+                                RPC::convert(
+                                    *txnProto->mutable_meta()
+                                         ->mutable_delivered_amount(),
+                                    *amt);
                             }
                         }
-                        RPC::convert(*txnProto->mutable_meta(), txnMeta);
                     }
                 }
             }
@@ -592,8 +604,9 @@ doAccountTxGrpc(
 
     if (request.has_marker())
     {
-        args.marker = {request.marker().ledger_index(),
-                       request.marker().account_sequence()};
+        args.marker = {
+            request.marker().ledger_index(),
+            request.marker().account_sequence()};
     }
 
     auto parseRes = parseLedgerArgs(request);

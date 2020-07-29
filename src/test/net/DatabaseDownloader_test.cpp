@@ -17,28 +17,26 @@
 */
 //==============================================================================
 
-#include <ripple/net/SSLHTTPDownloader.h>
+#include <ripple/net/DatabaseDownloader.h>
+#include <boost/filesystem/operations.hpp>
+#include <boost/predef.h>
+#include <condition_variable>
+#include <mutex>
 #include <test/jtx.h>
 #include <test/jtx/TrustedPublisherServer.h>
 #include <test/unit_test/FileDirGuard.h>
-#include <boost/filesystem.hpp>
-#include <boost/filesystem/operations.hpp>
-#include <boost/predef.h>
-#include <mutex>
-#include <condition_variable>
 
 namespace ripple {
 namespace test {
 
-class SSLHTTPDownloader_test : public beast::unit_test::suite
+class DatabaseDownloader_test : public beast::unit_test::suite
 {
-    TrustedPublisherServer createServer(
-        jtx::Env& env,
-        bool ssl = true)
+    TrustedPublisherServer
+    createServer(jtx::Env& env, bool ssl = true)
     {
         std::vector<TrustedPublisherServer::Validator> list;
-        list.push_back (TrustedPublisherServer::randomValidator());
-        return TrustedPublisherServer {
+        list.push_back(TrustedPublisherServer::randomValidator());
+        return TrustedPublisherServer{
             env.app().getIOService(),
             list,
             env.timeKeeper().now() + std::chrono::seconds{3600},
@@ -52,7 +50,8 @@ class SSLHTTPDownloader_test : public beast::unit_test::suite
         bool called = false;
         boost::filesystem::path dest;
 
-        void operator ()(boost::filesystem::path dst)
+        void
+        operator()(boost::filesystem::path dst)
         {
             std::unique_lock<std::mutex> lk(m);
             called = true;
@@ -60,7 +59,8 @@ class SSLHTTPDownloader_test : public beast::unit_test::suite
             cv.notify_one();
         };
 
-        bool waitComplete()
+        bool
+        waitComplete()
         {
             std::unique_lock<std::mutex> lk(m);
             using namespace std::chrono_literals;
@@ -69,7 +69,7 @@ class SSLHTTPDownloader_test : public beast::unit_test::suite
 #else
             auto constexpr timeout = 2s;
 #endif
-            auto stat = cv.wait_for(lk, timeout, [this]{return called;});
+            auto stat = cv.wait_for(lk, timeout, [this] { return called; });
             called = false;
             return stat;
         };
@@ -80,17 +80,21 @@ class SSLHTTPDownloader_test : public beast::unit_test::suite
     {
         test::StreamSink sink_;
         beast::Journal journal_;
-        // The SSLHTTPDownloader must be created as shared_ptr
+        // The DatabaseDownloader must be created as shared_ptr
         // because it uses shared_from_this
-        std::shared_ptr<SSLHTTPDownloader> ptr_;
+        std::shared_ptr<DatabaseDownloader> ptr_;
 
         Downloader(jtx::Env& env)
-        : journal_ {sink_}
-        , ptr_ {std::make_shared<SSLHTTPDownloader>(
-              env.app().getIOService(), journal_, env.app().config())}
-        {}
+            : journal_{sink_}
+            , ptr_{std::make_shared<DatabaseDownloader>(
+                  env.app().getIOService(),
+                  journal_,
+                  env.app().config())}
+        {
+        }
 
-        SSLHTTPDownloader* operator->()
+        DatabaseDownloader*
+        operator->()
         {
             return ptr_.get();
         }
@@ -99,29 +103,28 @@ class SSLHTTPDownloader_test : public beast::unit_test::suite
     void
     testDownload(bool verify)
     {
-        testcase <<
-            std::string("Basic download - SSL ") +
-            (verify ? "Verify" : "No Verify");
+        testcase << std::string("Basic download - SSL ") +
+                (verify ? "Verify" : "No Verify");
 
         using namespace jtx;
-        ripple::test::detail::FileDirGuard cert {
+
+        ripple::test::detail::FileDirGuard cert{
             *this, "_cert", "ca.pem", TrustedPublisherServer::ca_cert()};
 
-        Env env {*this, envconfig([&cert, &verify](std::unique_ptr<Config> cfg)
-            {
-                if ((cfg->SSL_VERIFY = verify)) //yes, this is assignment
-                    cfg->SSL_VERIFY_FILE = cert.file().string();
-                return cfg;
-            })};
+        Env env{*this, envconfig([&cert, &verify](std::unique_ptr<Config> cfg) {
+                    if ((cfg->SSL_VERIFY = verify))  // yes, this is assignment
+                        cfg->SSL_VERIFY_FILE = cert.file().string();
+                    return cfg;
+                })};
 
-        Downloader downloader {env};
+        Downloader downloader{env};
 
         // create a TrustedPublisherServer as a simple HTTP
         // server to request from. Use the /textfile endpoint
         // to get a simple text file sent as response.
         auto server = createServer(env);
 
-        ripple::test::detail::FileDirGuard const data {
+        ripple::test::detail::FileDirGuard const data{
             *this, "downloads", "data", "", false, false};
         // initiate the download and wait for the callback
         // to be invoked
@@ -131,7 +134,7 @@ class SSLHTTPDownloader_test : public beast::unit_test::suite
             "/textfile",
             11,
             data.file(),
-            std::function<void(boost::filesystem::path)> {std::ref(cb)});
+            std::function<void(boost::filesystem::path)>{std::ref(cb)});
         if (!BEAST_EXPECT(stat))
         {
             log << "Failed. LOGS:\n" + downloader.sink_.messages().str();
@@ -152,26 +155,15 @@ class SSLHTTPDownloader_test : public beast::unit_test::suite
     testFailures()
     {
         testcase("Error conditions");
-        using namespace jtx;
-        Env env {*this};
 
-        {
-            // file exists
-            Downloader dl {env};
-            ripple::test::detail::FileDirGuard const datafile {
-                *this, "downloads", "data", "file contents"};
-            BEAST_EXPECT(!dl->download(
-                "localhost",
-                "443",
-                "",
-                11,
-                datafile.file(),
-                std::function<void(boost::filesystem::path)> {std::ref(cb)}));
-        }
+        using namespace jtx;
+
+        Env env{*this};
+
         {
             // bad hostname
             boost::system::error_code ec;
-            boost::asio::ip::tcp::resolver resolver {env.app().getIOService()};
+            boost::asio::ip::tcp::resolver resolver{env.app().getIOService()};
             auto const results = resolver.resolve("badhostname", "443", ec);
             // we require an error in resolving this name in order
             // for this test to pass. Some networks might have DNS hijacking
@@ -179,8 +171,8 @@ class SSLHTTPDownloader_test : public beast::unit_test::suite
             // possible, so we skip the test.
             if (ec)
             {
-                Downloader dl {env};
-                ripple::test::detail::FileDirGuard const datafile {
+                Downloader dl{env};
+                ripple::test::detail::FileDirGuard const datafile{
                     *this, "downloads", "data", "", false, false};
                 BEAST_EXPECT(dl->download(
                     "badhostname",
@@ -188,19 +180,20 @@ class SSLHTTPDownloader_test : public beast::unit_test::suite
                     "",
                     11,
                     datafile.file(),
-                    std::function<void(boost::filesystem::path)> {std::ref(cb)}));
+                    std::function<void(boost::filesystem::path)>{
+                        std::ref(cb)}));
                 BEAST_EXPECT(cb.waitComplete());
                 BEAST_EXPECT(!boost::filesystem::exists(datafile.file()));
                 BEAST_EXPECTS(
-                    dl.sink_.messages().str().find("async_resolve")
-                        != std::string::npos,
+                    dl.sink_.messages().str().find("async_resolve") !=
+                        std::string::npos,
                     dl.sink_.messages().str());
             }
         }
         {
             // can't connect
-            Downloader dl {env};
-            ripple::test::detail::FileDirGuard const datafile {
+            Downloader dl{env};
+            ripple::test::detail::FileDirGuard const datafile{
                 *this, "downloads", "data", "", false, false};
             auto server = createServer(env);
             auto host = server.local_endpoint().address().to_string();
@@ -212,18 +205,18 @@ class SSLHTTPDownloader_test : public beast::unit_test::suite
                 "",
                 11,
                 datafile.file(),
-                std::function<void(boost::filesystem::path)> {std::ref(cb)}));
+                std::function<void(boost::filesystem::path)>{std::ref(cb)}));
             BEAST_EXPECT(cb.waitComplete());
             BEAST_EXPECT(!boost::filesystem::exists(datafile.file()));
             BEAST_EXPECTS(
-                dl.sink_.messages().str().find("async_connect")
-                    != std::string::npos,
+                dl.sink_.messages().str().find("async_connect") !=
+                    std::string::npos,
                 dl.sink_.messages().str());
         }
         {
             // not ssl (failed handlshake)
-            Downloader dl {env};
-            ripple::test::detail::FileDirGuard const datafile {
+            Downloader dl{env};
+            ripple::test::detail::FileDirGuard const datafile{
                 *this, "downloads", "data", "", false, false};
             auto server = createServer(env, false);
             BEAST_EXPECT(dl->download(
@@ -232,18 +225,18 @@ class SSLHTTPDownloader_test : public beast::unit_test::suite
                 "",
                 11,
                 datafile.file(),
-                std::function<void(boost::filesystem::path)> {std::ref(cb)}));
+                std::function<void(boost::filesystem::path)>{std::ref(cb)}));
             BEAST_EXPECT(cb.waitComplete());
             BEAST_EXPECT(!boost::filesystem::exists(datafile.file()));
             BEAST_EXPECTS(
-                dl.sink_.messages().str().find("async_handshake")
-                    != std::string::npos,
+                dl.sink_.messages().str().find("async_handshake") !=
+                    std::string::npos,
                 dl.sink_.messages().str());
         }
         {
             // huge file (content length)
-            Downloader dl {env};
-            ripple::test::detail::FileDirGuard const datafile {
+            Downloader dl{env};
+            ripple::test::detail::FileDirGuard const datafile{
                 *this, "downloads", "data", "", false, false};
             auto server = createServer(env);
             BEAST_EXPECT(dl->download(
@@ -252,12 +245,12 @@ class SSLHTTPDownloader_test : public beast::unit_test::suite
                 "/textfile/huge",
                 11,
                 datafile.file(),
-                std::function<void(boost::filesystem::path)> {std::ref(cb)}));
+                std::function<void(boost::filesystem::path)>{std::ref(cb)}));
             BEAST_EXPECT(cb.waitComplete());
             BEAST_EXPECT(!boost::filesystem::exists(datafile.file()));
             BEAST_EXPECTS(
-                dl.sink_.messages().str().find("Insufficient disk space")
-                    != std::string::npos,
+                dl.sink_.messages().str().find("Insufficient disk space") !=
+                    std::string::npos,
                 dl.sink_.messages().str());
         }
     }
@@ -270,9 +263,8 @@ public:
         testDownload(false);
         testFailures();
     }
-
 };
 
-BEAST_DEFINE_TESTSUITE(SSLHTTPDownloader, net, ripple);
+BEAST_DEFINE_TESTSUITE(DatabaseDownloader, net, ripple);
 }  // namespace test
 }  // namespace ripple

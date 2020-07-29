@@ -25,16 +25,17 @@
 #include <ripple/core/Config.h>
 #include <ripple/net/HTTPClientSSLContext.h>
 #include <boost/asio/ssl.hpp>
-#include <boost/bind.hpp>
 #include <boost/format.hpp>
+
+#include <functional>
 
 namespace ripple {
 
 namespace detail {
 
 // Work over SSL
-class WorkSSL : public WorkBase<WorkSSL>
-    , public std::enable_shared_from_this<WorkSSL>
+class WorkSSL : public WorkBase<WorkSSL>,
+                public std::enable_shared_from_this<WorkSSL>
 {
     friend class WorkBase<WorkSSL>;
 
@@ -85,8 +86,8 @@ WorkSSL::WorkSSL(
 {
     auto ec = context_.preConnectVerify(stream_, host_);
     if (ec)
-        Throw<std::runtime_error> (
-            boost::str (boost::format ("preConnectVerify: %s") % ec.message ()));
+        Throw<std::runtime_error>(
+            boost::str(boost::format("preConnectVerify: %s") % ec.message()));
 }
 
 void
@@ -98,8 +99,8 @@ WorkSSL::onConnect(error_code const& ec)
 
     stream_.async_handshake(
         boost::asio::ssl::stream_base::client,
-        strand_.wrap (boost::bind(&WorkSSL::onHandshake, shared_from_this(),
-            boost::asio::placeholders::error)));
+        strand_.wrap(std::bind(
+            &WorkSSL::onHandshake, shared_from_this(), std::placeholders::_1)));
 }
 
 void
@@ -108,11 +109,11 @@ WorkSSL::onHandshake(error_code const& ec)
     if (ec)
         return fail(ec);
 
-    onStart ();
+    onStart();
 }
 
-} // detail
+}  // namespace detail
 
-} // ripple
+}  // namespace ripple
 
 #endif

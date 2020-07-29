@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of rippled: https://github.com/ripple/rippled
-    Copyright (c) 2012, 2013 Ripple Labs Inc.
+    Copyright (c) 2012, 2019 Ripple Labs Inc.
 
     Permission to use, copy, modify, and/or distribute this software for any
     purpose  with  or without fee is hereby granted, provided that the above
@@ -17,37 +17,43 @@
 */
 //==============================================================================
 
-#include <ripple/shamap/SHAMapMissingNode.h>
-#include <ripple/beast/utility/Zero.h>
-#include <ostream>
+#ifndef RIPPLE_NODESTORE_TASKQUEUE_H_INCLUDED
+#define RIPPLE_NODESTORE_TASKQUEUE_H_INCLUDED
+
+#include <ripple/core/Stoppable.h>
+#include <ripple/core/impl/Workers.h>
+
+#include <functional>
+#include <queue>
 
 namespace ripple {
+namespace NodeStore {
 
-std::ostream&
-operator<< (std::ostream& out, const SHAMapMissingNode& mn)
+class TaskQueue : public Stoppable, private Workers::Callback
 {
-    switch (mn.mType)
-    {
-    case SHAMapType::TRANSACTION:
-        out << "Missing/TXN(";
-        break;
+public:
+    explicit TaskQueue(Stoppable& parent);
 
-    case SHAMapType::STATE:
-        out << "Missing/STA(";
-        break;
+    void
+    onStop() override;
 
-    case SHAMapType::FREE:
-    default:
-        out << "Missing/(";
-        break;
-    };
+    /** Adds a task to the queue
 
-    if (mn.mNodeHash == beast::zero)
-        out << "id : " << mn.mNodeID;
-    else
-        out << "hash : " << mn.mNodeHash;
-    out << ")";
-    return out;
-}
+        @param task std::function with signature void()
+    */
+    void
+    addTask(std::function<void()> task);
 
-} // ripple
+private:
+    std::mutex mutex_;
+    Workers workers_;
+    std::queue<std::function<void()>> tasks_;
+
+    void
+    processTask(int instance) override;
+};
+
+}  // namespace NodeStore
+}  // namespace ripple
+
+#endif

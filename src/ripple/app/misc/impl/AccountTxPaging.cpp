@@ -17,8 +17,8 @@
 */
 //==============================================================================
 
-#include <ripple/app/ledger/LedgerToJson.h>
 #include <ripple/app/ledger/LedgerMaster.h>
+#include <ripple/app/ledger/LedgerToJson.h>
 #include <ripple/app/main/Application.h>
 #include <ripple/app/misc/Transaction.h>
 #include <ripple/app/misc/impl/AccountTxPaging.h>
@@ -30,7 +30,7 @@
 namespace ripple {
 
 void
-convertBlobsToTxResult (
+convertBlobsToTxResult(
     NetworkOPs::AccountTxs& to,
     std::uint32_t ledger_index,
     std::string const& status,
@@ -38,23 +38,23 @@ convertBlobsToTxResult (
     Blob const& rawMeta,
     Application& app)
 {
-    SerialIter it (makeSlice(rawTxn));
-    auto txn = std::make_shared<STTx const> (it);
+    SerialIter it(makeSlice(rawTxn));
+    auto txn = std::make_shared<STTx const>(it);
     std::string reason;
 
-    auto tr = std::make_shared<Transaction> (txn, reason, app);
+    auto tr = std::make_shared<Transaction>(txn, reason, app);
 
-    tr->setStatus (Transaction::sqlTransactionStatus(status));
-    tr->setLedger (ledger_index);
+    tr->setStatus(Transaction::sqlTransactionStatus(status));
+    tr->setLedger(ledger_index);
 
-    auto metaset = std::make_shared<TxMeta> (
-        tr->getID (), tr->getLedger (), rawMeta);
+    auto metaset =
+        std::make_shared<TxMeta>(tr->getID(), tr->getLedger(), rawMeta);
 
     to.emplace_back(std::move(tr), metaset);
 };
 
 void
-saveLedgerAsync (Application& app, std::uint32_t seq)
+saveLedgerAsync(Application& app, std::uint32_t seq)
 {
     if (auto l = app.getLedgerMaster().getLedgerBySeq(seq))
         pendSaveValidated(app, l, false, false);
@@ -65,11 +65,9 @@ accountTxPage(
     DatabaseCon& connection,
     AccountIDCache const& idCache,
     std::function<void(std::uint32_t)> const& onUnsavedLedger,
-    std::function<void(
-        std::uint32_t,
-        std::string const&,
-        Blob const&,
-        Blob const&)> const& onTransaction,
+    std::function<
+        void(std::uint32_t, std::string const&, Blob&&, Blob&&)> const&
+        onTransaction,
     AccountID const& account,
     std::int32_t minLedger,
     std::int32_t maxLedger,
@@ -247,11 +245,21 @@ accountTxPage(
                 if (rawMeta.size() == 0)
                     onUnsavedLedger(ledgerSeq.value_or(0));
 
+                // `rawData` and `rawMeta` will be used after they are moved.
+                // That's OK.
                 onTransaction(
                     rangeCheckedCast<std::uint32_t>(ledgerSeq.value_or(0)),
                     *status,
-                    rawData,
-                    rawMeta);
+                    std::move(rawData),
+                    std::move(rawMeta));
+                // Note some callbacks will move the data, some will not. Clear
+                // them so code doesn't depend on if the data was actually moved
+                // or not. The code will be more efficient if `rawData` and
+                // `rawMeta` don't have to allocate in `convert`, so don't
+                // refactor my moving these variables into loop scope.
+                rawData.clear();
+                rawMeta.clear();
+
                 --numberOfResults;
             }
         }
@@ -259,4 +267,4 @@ accountTxPage(
 
     return;
 }
-}
+}  // namespace ripple

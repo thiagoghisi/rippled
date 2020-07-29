@@ -47,6 +47,7 @@ struct Context
     Role role;
     std::shared_ptr<JobQueue::Coro> coro{};
     InfoSub::pointer infoSub{};
+    unsigned int apiVersion;
 };
 
 struct JsonContext : public Context
@@ -62,8 +63,7 @@ struct JsonContext : public Context
 
     Json::Value params;
 
-    unsigned int apiVersion;
-    Headers headers {};
+    Headers headers{};
 };
 
 template <class RequestType>
@@ -72,7 +72,7 @@ struct GRPCContext : public Context
     RequestType params;
 };
 
-} // RPC
-} // ripple
+}  // namespace RPC
+}  // namespace ripple
 
 #endif

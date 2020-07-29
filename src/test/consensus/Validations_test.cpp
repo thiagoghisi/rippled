@@ -54,7 +54,7 @@ class Validations_test : public beast::unit_test::suite
         clock_type const& c_;
         PeerID nodeID_;
         bool trusted_ = true;
-        std::size_t signIdx_ = 1;
+        std::size_t signIdx_{1};
         boost::optional<std::uint32_t> loadFee_;
 
     public:
@@ -119,14 +119,15 @@ class Validations_test : public beast::unit_test::suite
             NetClock::duration seenOffset,
             bool full) const
         {
-            Validation v{id,
-                         seq,
-                         now() + signOffset,
-                         now() + seenOffset,
-                         currKey(),
-                         nodeID_,
-                         full,
-                         loadFee_};
+            Validation v{
+                id,
+                seq,
+                now() + signOffset,
+                now() + seenOffset,
+                currKey(),
+                nodeID_,
+                full,
+                loadFee_};
             if (trusted_)
                 v.setTrusted();
             return v;
@@ -189,8 +190,7 @@ class Validations_test : public beast::unit_test::suite
         using Validation = csf::Validation;
         using Ledger = csf::Ledger;
 
-        Adaptor(clock_type& c, LedgerOracle& o)
-            : c_{c}, oracle_{o}
+        Adaptor(clock_type& c, LedgerOracle& o) : c_{c}, oracle_{o}
         {
         }
 
@@ -220,8 +220,7 @@ class Validations_test : public beast::unit_test::suite
         PeerID nextNodeId_{0};
 
     public:
-        explicit TestHarness(LedgerOracle& o)
-            : tv_(p_, clock_, clock_, o)
+        explicit TestHarness(LedgerOracle& o) : tv_(p_, clock_, clock_, o)
         {
         }
 
@@ -395,7 +394,7 @@ class Validations_test : public beast::unit_test::suite
 
                 // If we advance far enough for AB to expire, we can fully
                 // validate or partially validate that sequence number again
-                BEAST_EXPECT(ValStatus::badSeq == process(ledgerAZ));
+                BEAST_EXPECT(ValStatus::conflicting == process(ledgerAZ));
                 harness.clock().advance(
                     harness.parms().validationSET_EXPIRES + 1ms);
                 BEAST_EXPECT(ValStatus::current == process(ledgerAZ));
@@ -684,8 +683,10 @@ class Validations_test : public beast::unit_test::suite
                 trustedValidations[val.ledgerID()].emplace_back(val);
         }
         // d now thinks ledger 1, but cannot re-issue a previously used seq
+        // and attempting it should generate a conflict.
         {
-            BEAST_EXPECT(ValStatus::badSeq == harness.add(d.partial(ledgerA)));
+            BEAST_EXPECT(
+                ValStatus::conflicting == harness.add(d.partial(ledgerA)));
         }
         // e only issues partials
         {
@@ -706,10 +707,18 @@ class Validations_test : public beast::unit_test::suite
         Node a = harness.makeNode();
 
         Ledger ledgerA = h["a"];
-
         BEAST_EXPECT(ValStatus::current == harness.add(a.validate(ledgerA)));
         BEAST_EXPECT(harness.vals().numTrustedForLedger(ledgerA.id()));
+
+        // Keep the validation from expire
         harness.clock().advance(harness.parms().validationSET_EXPIRES);
+        harness.vals().setSeqToKeep(ledgerA.seq());
+        harness.vals().expire();
+        BEAST_EXPECT(harness.vals().numTrustedForLedger(ledgerA.id()));
+
+        // Allow the validation to expire
+        harness.clock().advance(harness.parms().validationSET_EXPIRES);
+        harness.vals().setSeqToKeep(++ledgerA.seq());
         harness.vals().expire();
         BEAST_EXPECT(!harness.vals().numTrustedForLedger(ledgerA.id()));
     }

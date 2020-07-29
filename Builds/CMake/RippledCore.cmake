@@ -114,7 +114,8 @@ target_sources (xrpl_core PRIVATE
   src/ripple/crypto/impl/RFC1751.cpp
   src/ripple/crypto/impl/csprng.cpp
   src/ripple/crypto/impl/ec_key.cpp
-  src/ripple/crypto/impl/openssl.cpp)
+  src/ripple/crypto/impl/openssl.cpp
+  src/ripple/crypto/impl/secure_erase.cpp)
 
 add_library (Ripple::xrpl_core ALIAS xrpl_core)
 target_include_directories (xrpl_core
@@ -149,6 +150,7 @@ install (
     src/ripple/basics/IOUAmount.h
     src/ripple/basics/LocalValue.h
     src/ripple/basics/Log.h
+    src/ripple/basics/MathUtilities.h
     src/ripple/basics/safe_cast.h
     src/ripple/basics/Slice.h
     src/ripple/basics/StringUtilities.h
@@ -168,6 +170,7 @@ install (
     src/ripple/crypto/GenerateDeterministicKey.h
     src/ripple/crypto/RFC1751.h
     src/ripple/crypto/csprng.h
+    src/ripple/crypto/secure_erase.h
   DESTINATION include/ripple/crypto)
 install (
   FILES
@@ -267,7 +270,6 @@ install (
     src/ripple/beast/crypto/detail/ripemd_context.h
     src/ripple/beast/crypto/detail/sha2_context.h
     src/ripple/beast/crypto/ripemd.h
-    src/ripple/beast/crypto/secure_erase.h
     src/ripple/beast/crypto/sha2.h
   DESTINATION include/ripple/beast/crypto)
 install (
@@ -375,6 +377,7 @@ target_sources (rippled PRIVATE
   src/ripple/app/misc/CanonicalTXSet.cpp
   src/ripple/app/misc/FeeVoteImpl.cpp
   src/ripple/app/misc/HashRouter.cpp
+  src/ripple/app/misc/NegativeUNLVote.cpp
   src/ripple/app/misc/NetworkOPs.cpp
   src/ripple/app/misc/SHAMapStoreImp.cpp
   src/ripple/app/misc/impl/AccountTxPaging.cpp
@@ -433,7 +436,6 @@ target_sources (rippled PRIVATE
   src/ripple/basics/impl/BasicConfig.cpp
   src/ripple/basics/impl/PerfLogImp.cpp
   src/ripple/basics/impl/ResolverAsio.cpp
-  src/ripple/basics/impl/Sustain.cpp
   src/ripple/basics/impl/UptimeClock.cpp
   src/ripple/basics/impl/make_SSLContext.cpp
   src/ripple/basics/impl/mulDiv.cpp
@@ -487,6 +489,7 @@ target_sources (rippled PRIVATE
      main sources:
        subdir: net
   #]===============================]
+  src/ripple/net/impl/DatabaseDownloader.cpp
   src/ripple/net/impl/HTTPClient.cpp
   src/ripple/net/impl/InfoSub.cpp
   src/ripple/net/impl/RPCCall.cpp
@@ -507,12 +510,14 @@ target_sources (rippled PRIVATE
   src/ripple/nodestore/impl/DatabaseNodeImp.cpp
   src/ripple/nodestore/impl/DatabaseRotatingImp.cpp
   src/ripple/nodestore/impl/DatabaseShardImp.cpp
+  src/ripple/nodestore/impl/DeterministicShard.cpp
   src/ripple/nodestore/impl/DecodedBlob.cpp
   src/ripple/nodestore/impl/DummyScheduler.cpp
   src/ripple/nodestore/impl/EncodedBlob.cpp
   src/ripple/nodestore/impl/ManagerImp.cpp
   src/ripple/nodestore/impl/NodeObject.cpp
   src/ripple/nodestore/impl/Shard.cpp
+  src/ripple/nodestore/impl/TaskQueue.cpp
   #[===============================[
      main sources:
        subdir: overlay
@@ -620,6 +625,7 @@ target_sources (rippled PRIVATE
   src/ripple/rpc/impl/Role.cpp
   src/ripple/rpc/impl/ServerHandlerImp.cpp
   src/ripple/rpc/impl/ShardArchiveHandler.cpp
+  src/ripple/rpc/impl/ShardVerificationScheduler.cpp
   src/ripple/rpc/impl/Status.cpp
   src/ripple/rpc/impl/TransactionSign.cpp
 
@@ -633,13 +639,14 @@ target_sources (rippled PRIVATE
      main sources:
        subdir: shamap
   #]===============================]
+  src/ripple/shamap/impl/NodeFamily.cpp
   src/ripple/shamap/impl/SHAMap.cpp
   src/ripple/shamap/impl/SHAMapDelta.cpp
   src/ripple/shamap/impl/SHAMapItem.cpp
-  src/ripple/shamap/impl/SHAMapMissingNode.cpp
   src/ripple/shamap/impl/SHAMapNodeID.cpp
   src/ripple/shamap/impl/SHAMapSync.cpp
   src/ripple/shamap/impl/SHAMapTreeNode.cpp
+  src/ripple/shamap/impl/ShardFamily.cpp
   #[===============================[
      test sources:
        subdir: app
@@ -740,6 +747,7 @@ target_sources (rippled PRIVATE
   src/test/consensus/DistributedValidatorsSim_test.cpp
   src/test/consensus/LedgerTiming_test.cpp
   src/test/consensus/LedgerTrie_test.cpp
+  src/test/consensus/NegativeUNL_test.cpp
   src/test/consensus/ScaleFreeSim_test.cpp
   src/test/consensus/Validations_test.cpp
   #[===============================[
@@ -835,13 +843,14 @@ target_sources (rippled PRIVATE
      test sources:
        subdir: net
   #]===============================]
-  src/test/net/SSLHTTPDownloader_test.cpp
+  src/test/net/DatabaseDownloader_test.cpp
   #[===============================[
      test sources:
        subdir: nodestore
   #]===============================]
   src/test/nodestore/Backend_test.cpp
   src/test/nodestore/Basics_test.cpp
+  src/test/nodestore/DatabaseShard_test.cpp
   src/test/nodestore/Database_test.cpp
   src/test/nodestore/Timing_test.cpp
   src/test/nodestore/import_test.cpp
@@ -853,6 +862,7 @@ target_sources (rippled PRIVATE
   src/test/overlay/ProtocolVersion_test.cpp
   src/test/overlay/cluster_test.cpp
   src/test/overlay/short_read_test.cpp
+  src/test/overlay/compression_test.cpp
   #[===============================[
      test sources:
        subdir: peerfinder
@@ -863,6 +873,7 @@ target_sources (rippled PRIVATE
      test sources:
        subdir: protocol
   #]===============================]
+  src/test/protocol/BuildInfo_test.cpp
   src/test/protocol/InnerObjectFormats_test.cpp
   src/test/protocol/Issue_test.cpp
   src/test/protocol/PublicKey_test.cpp
@@ -917,6 +928,7 @@ target_sources (rippled PRIVATE
   src/test/rpc/RPCOverload_test.cpp
   src/test/rpc/RobustTransaction_test.cpp
   src/test/rpc/ServerInfo_test.cpp
+  src/test/rpc/ShardArchiveHandler_test.cpp
   src/test/rpc/Status_test.cpp
   src/test/rpc/Submit_test.cpp
   src/test/rpc/Subscribe_test.cpp
@@ -961,7 +973,8 @@ endif ()
 if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.16)
   # any files that don't play well with unity should be added here
   set_source_files_properties(
-    # this one seems to produce conflicts in beast teardown template methods:
+    # these two seem to produce conflicts in beast teardown template methods
     src/test/rpc/ValidatorRPC_test.cpp
+    src/test/rpc/ShardArchiveHandler_test.cpp
     PROPERTIES SKIP_UNITY_BUILD_INCLUSION TRUE)
 endif ()

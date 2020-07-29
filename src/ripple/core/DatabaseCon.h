@@ -24,51 +24,57 @@
 #include <ripple/core/Config.h>
 #include <ripple/core/SociDB.h>
 #include <boost/filesystem/path.hpp>
+#include <boost/optional.hpp>
 #include <mutex>
 #include <string>
 
 namespace soci {
-    class session;
+class session;
 }
 
 namespace ripple {
 
-template<class T, class TMutex>
+template <class T, class TMutex>
 class LockedPointer
 {
 public:
     using mutex = TMutex;
+
 private:
     T* it_;
     std::unique_lock<mutex> lock_;
 
 public:
-    LockedPointer (T* it, mutex& m) : it_ (it), lock_ (m)
+    LockedPointer(T* it, mutex& m) : it_(it), lock_(m)
     {
     }
-    LockedPointer (LockedPointer&& rhs) noexcept
-        : it_ (rhs.it_), lock_ (std::move (rhs.lock_))
+    LockedPointer(LockedPointer&& rhs) noexcept
+        : it_(rhs.it_), lock_(std::move(rhs.lock_))
     {
     }
-    LockedPointer () = delete;
-    LockedPointer (LockedPointer const& rhs) = delete;
-    LockedPointer& operator=(LockedPointer const& rhs) = delete;
+    LockedPointer() = delete;
+    LockedPointer(LockedPointer const& rhs) = delete;
+    LockedPointer&
+    operator=(LockedPointer const& rhs) = delete;
 
-    T* get ()
+    T*
+    get()
     {
         return it_;
     }
-    T& operator*()
+    T&
+    operator*()
     {
         return *it_;
     }
-    T* operator->()
+    T*
+    operator->()
     {
         return it_;
     }
     explicit operator bool() const
     {
-        return bool (it_);
+        return bool(it_);
     }
 };
 
@@ -84,26 +90,83 @@ public:
         Config::StartUpType startUp = Config::NORMAL;
         bool standAlone = false;
         boost::filesystem::path dataDir;
+        // Indicates whether or not to return the `globalPragma`
+        // from commonPragma()
+        bool useGlobalPragma = false;
+
+        std::vector<std::string> const*
+        commonPragma() const
+        {
+            assert(!useGlobalPragma || globalPragma);
+            return useGlobalPragma && globalPragma ? globalPragma.get()
+                                                   : nullptr;
+        }
+
+        static std::unique_ptr<std::vector<std::string> const> globalPragma;
     };
 
-    template<std::size_t N, std::size_t M>
+    template <std::size_t N, std::size_t M>
     DatabaseCon(
         Setup const& setup,
         std::string const& DBName,
         std::array<char const*, N> const& pragma,
         std::array<char const*, M> const& initSQL)
-    {
         // Use temporary files or regular DB files?
-        auto const useTempFiles =
-            setup.standAlone &&
-            setup.startUp != Config::LOAD &&
-            setup.startUp != Config::LOAD_FILE &&
-            setup.startUp != Config::REPLAY;
-        boost::filesystem::path pPath =
-            useTempFiles ? "" : (setup.dataDir / DBName);
+        : DatabaseCon(
+              setup.standAlone && setup.startUp != Config::LOAD &&
+                      setup.startUp != Config::LOAD_FILE &&
+                      setup.startUp != Config::REPLAY
+                  ? ""
+                  : (setup.dataDir / DBName),
+              setup.commonPragma(),
+              pragma,
+              initSQL)
+    {
+    }
 
+    template <std::size_t N, std::size_t M>
+    DatabaseCon(
+        boost::filesystem::path const& dataDir,
+        std::string const& DBName,
+        std::array<char const*, N> const& pragma,
+        std::array<char const*, M> const& initSQL)
+        : DatabaseCon(dataDir / DBName, nullptr, pragma, initSQL)
+    {
+    }
+
+    soci::session&
+    getSession()
+    {
+        return session_;
+    }
+
+    LockedSociSession
+    checkoutDb()
+    {
+        return LockedSociSession(&session_, lock_);
+    }
+
+    void
+    setupCheckpointing(JobQueue*, Logs&);
+
+private:
+    template <std::size_t N, std::size_t M>
+    DatabaseCon(
+        boost::filesystem::path const& pPath,
+        std::vector<std::string> const* commonPragma,
+        std::array<char const*, N> const& pragma,
+        std::array<char const*, M> const& initSQL)
+    {
         open(session_, "sqlite", pPath.string());
 
+        if (commonPragma)
+        {
+            for (auto const& p : *commonPragma)
+            {
+                soci::statement st = session_.prepare << p;
+                st.execute(true);
+            }
+        }
         for (auto const& p : pragma)
         {
             soci::statement st = session_.prepare << p;
@@ -116,19 +179,6 @@ public:
         }
     }
 
-    soci::session& getSession()
-    {
-        return session_;
-    }
-
-    LockedSociSession checkoutDb ()
-    {
-        return LockedSociSession (&session_, lock_);
-    }
-
-    void setupCheckpointing (JobQueue*, Logs&);
-
-private:
     LockedSociSession::mutex lock_;
 
     soci::session session_;
@@ -136,8 +186,10 @@ private:
 };
 
 DatabaseCon::Setup
-setup_DatabaseCon (Config const& c);
+setup_DatabaseCon(
+    Config const& c,
+    boost::optional<beast::Journal> j = boost::none);
 
-} // ripple
+}  // namespace ripple
 
 #endif

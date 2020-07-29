@@ -20,11 +20,12 @@
 #ifndef RIPPLE_APP_MISC_SHAMAPSTOREIMP_H_INCLUDED
 #define RIPPLE_APP_MISC_SHAMAPSTOREIMP_H_INCLUDED
 
-#include <ripple/app/misc/SHAMapStore.h>
 #include <ripple/app/ledger/LedgerMaster.h>
+#include <ripple/app/misc/SHAMapStore.h>
 #include <ripple/core/DatabaseCon.h>
 #include <ripple/nodestore/DatabaseRotating.h>
-
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <thread>
 
@@ -42,12 +43,7 @@ private:
         LedgerIndex lastRotated;
     };
 
-    enum Health : std::uint8_t
-    {
-        ok = 0,
-        stopping,
-        unhealthy
-    };
+    enum Health : std::uint8_t { ok = 0, stopping, unhealthy };
 
     class SavedStateDB
     {
@@ -58,18 +54,24 @@ private:
 
         // Just instantiate without any logic in case online delete is not
         // configured
-        explicit SavedStateDB()
-        : journal_ {beast::Journal::getNullSink()}
-        { }
+        explicit SavedStateDB() : journal_{beast::Journal::getNullSink()}
+        {
+        }
 
         // opens database and, if necessary, creates & initializes its tables.
-        void init (BasicConfig const& config, std::string const& dbName);
+        void
+        init(BasicConfig const& config, std::string const& dbName);
         // get/set the ledger index that we can delete up to and including
-        LedgerIndex getCanDelete();
-        LedgerIndex setCanDelete (LedgerIndex canDelete);
-        SavedState getState();
-        void setState (SavedState const& state);
-        void setLastRotated (LedgerIndex seq);
+        LedgerIndex
+        getCanDelete();
+        LedgerIndex
+        setCanDelete(LedgerIndex canDelete);
+        SavedState
+        getState();
+        void
+        setState(SavedState const& state);
+        void
+        setLastRotated(LedgerIndex seq);
     };
 
     Application& app_;
@@ -84,6 +86,8 @@ private:
     static std::uint32_t const minimumDeletionInterval_ = 256;
     // minimum # of ledgers required for standalone mode.
     static std::uint32_t const minimumDeletionIntervalSA_ = 8;
+    // minimum ledger to maintain online.
+    std::atomic<LedgerIndex> minimumOnline_{};
 
     NodeStore::Scheduler& scheduler_;
     beast::Journal const journal_;
@@ -97,14 +101,20 @@ private:
     mutable std::mutex mutex_;
     std::shared_ptr<Ledger const> newLedger_;
     std::atomic<bool> working_;
-    std::atomic <LedgerIndex> canDelete_;
+    std::atomic<LedgerIndex> canDelete_;
     int fdRequired_ = 0;
 
     std::uint32_t deleteInterval_ = 0;
     bool advisoryDelete_ = false;
     std::uint32_t deleteBatch_ = 100;
-    std::uint32_t backOff_ = 100;
-    std::int32_t ageThreshold_ = 60;
+    std::chrono::milliseconds backOff_{100};
+    std::chrono::seconds ageThreshold_{60};
+    /// If set, and the node is out of sync during an
+    /// online_delete health check, sleep the thread
+    /// for this time and check again so the node can
+    /// recover.
+    /// See also: "recovery_wait_seconds" in rippled-example.cfg
+    boost::optional<std::chrono::seconds> recoveryWaitTime_;
 
     // these do not exist upon SHAMapStore creation, but do exist
     // as of onPrepare() or before
@@ -131,21 +141,21 @@ public:
     }
 
     std::uint32_t
-    clampFetchDepth (std::uint32_t fetch_depth) const override
+    clampFetchDepth(std::uint32_t fetch_depth) const override
     {
-        return deleteInterval_ ? std::min (fetch_depth,
-            deleteInterval_) : fetch_depth;
+        return deleteInterval_ ? std::min(fetch_depth, deleteInterval_)
+                               : fetch_depth;
     }
 
-    std::unique_ptr <NodeStore::Database>
+    std::unique_ptr<NodeStore::Database>
     makeNodeStore(std::string const& name, std::int32_t readThreads) override;
 
     LedgerIndex
-    setCanDelete (LedgerIndex seq) override
+    setCanDelete(LedgerIndex seq) override
     {
         if (advisoryDelete_)
             canDelete_ = seq;
-        return state_db_.setCanDelete (seq);
+        return state_db_.setCanDelete(seq);
     }
 
     bool
@@ -170,54 +180,72 @@ public:
         return canDelete_;
     }
 
-    void onLedgerClosed (std::shared_ptr<Ledger const> const& ledger) override;
+    void
+    onLedgerClosed(std::shared_ptr<Ledger const> const& ledger) override;
 
-    void rendezvous() const override;
-    int fdRequired() const override;
+    void
+    rendezvous() const override;
+    int
+    fdRequired() const override;
+
+    boost::optional<LedgerIndex>
+    minimumOnline() const override;
 
 private:
     // callback for visitNodes
-    bool copyNode (std::uint64_t& nodeCount, SHAMapAbstractNode const &node);
-    void run();
-    void dbPaths();
+    bool
+    copyNode(std::uint64_t& nodeCount, SHAMapAbstractNode const& node);
+    void
+    run();
+    void
+    dbPaths();
 
     std::unique_ptr<NodeStore::Backend>
-    makeBackendRotating (std::string path = std::string());
+    makeBackendRotating(std::string path = std::string());
 
     template <class CacheInstance>
     bool
-    freshenCache (CacheInstance& cache)
+    freshenCache(CacheInstance& cache)
     {
         std::uint64_t check = 0;
 
-        for (auto const& key: cache.getKeys())
+        for (auto const& key : cache.getKeys())
         {
             dbRotating_->fetch(key, 0);
-            if (! (++check % checkHealthInterval_) && health())
+            if (!(++check % checkHealthInterval_) && health())
                 return true;
         }
 
         return false;
     }
 
-    /** delete from sqlite table in batches to not lock the db excessively
-     *  pause briefly to extend access time to other users
-     *  call with mutex object unlocked
-     *  @return true if any deletable rows were found (though not
-     *      necessarily deleted.
+    /** delete from sqlite table in batches to not lock the db excessively.
+     *  Pause briefly to extend access time to other users.
+     *  Call with mutex object unlocked.
      */
-    bool clearSql (DatabaseCon& database, LedgerIndex lastRotated,
-                   std::string const& minQuery, std::string const& deleteQuery);
-    void clearCaches (LedgerIndex validatedSeq);
-    void freshenCaches();
-    void clearPrior (LedgerIndex lastRotated);
+    void
+    clearSql(
+        DatabaseCon& database,
+        LedgerIndex lastRotated,
+        std::string const& minQuery,
+        std::string const& deleteQuery);
+    void
+    clearCaches(LedgerIndex validatedSeq);
+    void
+    freshenCaches();
+    void
+    clearPrior(LedgerIndex lastRotated);
 
     // If rippled is not healthy, defer rotate-delete.
     // If already unhealthy, do not change state on further check.
     // Assume that, once unhealthy, a necessary step has been
     // aborted, so the online-delete process needs to restart
     // at next ledger.
-    Health health();
+    // If recoveryWaitTime_ is set, this may sleep to give rippled
+    // time to recover, so never call it from any thread other than
+    // the main "run()".
+    Health
+    health();
     //
     // Stoppable
     //
@@ -230,16 +258,17 @@ private:
     onStart() override
     {
         if (deleteInterval_)
-            thread_ = std::thread (&SHAMapStoreImp::run, this);
+            thread_ = std::thread(&SHAMapStoreImp::run, this);
     }
 
     // Called when the application begins shutdown
-    void onStop() override;
+    void
+    onStop() override;
     // Called when all child Stoppable objects have stoped
-    void onChildrenStopped() override;
-
+    void
+    onChildrenStopped() override;
 };
 
-}
+}  // namespace ripple
 
 #endif

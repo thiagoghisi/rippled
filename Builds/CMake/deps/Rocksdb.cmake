@@ -8,7 +8,7 @@ set_target_properties (rocksdb_lib
 
 option (local_rocksdb "use local build of rocksdb." OFF)
 if (NOT local_rocksdb)
-  find_package (RocksDB 6.5 QUIET CONFIG)
+  find_package (RocksDB 6.7 QUIET CONFIG)
   if (TARGET RocksDB::rocksdb)
     message (STATUS "Found RocksDB using config.")
     get_target_property (_rockslib_l RocksDB::rocksdb IMPORTED_LOCATION_DEBUG)
@@ -40,7 +40,7 @@ if (NOT local_rocksdb)
       # TBD if there is some way to extract transitive deps..then:
       #set (RocksDB_USE_STATIC ON)
     else ()
-      find_package (RocksDB 6.5 MODULE)
+      find_package (RocksDB 6.7 MODULE)
       if (ROCKSDB_FOUND)
         if (RocksDB_LIBRARY_DEBUG)
           set_target_properties (rocksdb_lib PROPERTIES IMPORTED_LOCATION_DEBUG ${RocksDB_LIBRARY_DEBUG})
@@ -60,17 +60,17 @@ if (local_rocksdb)
   ExternalProject_Add (rocksdb
     PREFIX ${nih_cache_path}
     GIT_REPOSITORY https://github.com/facebook/rocksdb.git
-    GIT_TAG v6.5.3
+    GIT_TAG v6.7.3
     PATCH_COMMAND
       # only used by windows build
       ${CMAKE_COMMAND} -E copy
-      ${CMAKE_SOURCE_DIR}/Builds/CMake/rocks_thirdparty.inc
+      ${CMAKE_CURRENT_SOURCE_DIR}/Builds/CMake/rocks_thirdparty.inc
       <SOURCE_DIR>/thirdparty.inc
     COMMAND
       # fixup their build version file to keep the values
       # from changing always
       ${CMAKE_COMMAND} -E copy_if_different
-      ${CMAKE_SOURCE_DIR}/Builds/CMake/rocksdb_build_version.cc.in
+      ${CMAKE_CURRENT_SOURCE_DIR}/Builds/CMake/rocksdb_build_version.cc.in
       <SOURCE_DIR>/util/build_version.cc.in
     CMAKE_ARGS
       -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}

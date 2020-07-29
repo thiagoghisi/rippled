@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of rippled: https://github.com/ripple/rippled
-    Copyright (c) 2012, 2013 Ripple Labs Inc.
+    Copyright (c) 2012, 2019 Ripple Labs Inc.
 
     Permission to use, copy, modify, and/or distribute this software for any
     purpose  with  or without fee is hereby granted, provided that the above
@@ -17,19 +17,50 @@
 */
 //==============================================================================
 
-#ifndef RIPPLE_BASICS_SUSTAIN_H_INCLUDED
-#define RIPPLE_BASICS_SUSTAIN_H_INCLUDED
+#include <ripple/nodestore/impl/TaskQueue.h>
 
-#include <string>
+#include <cassert>
 
 namespace ripple {
+namespace NodeStore {
 
-// "Sustain" is a system for a buddy process that monitors the main process
-// and relaunches it on a fault.
-bool HaveSustain ();
-std::string StopSustain ();
-std::string DoSustain ();
+TaskQueue::TaskQueue(Stoppable& parent)
+    : Stoppable("TaskQueue", parent)
+    , workers_(*this, nullptr, "Shard store taskQueue", 1)
+{
+}
 
-} // ripple
+void
+TaskQueue::onStop()
+{
+    workers_.pauseAllThreadsAndWait();
+    stopped();
+}
 
-#endif
+void
+TaskQueue::addTask(std::function<void()> task)
+{
+    std::lock_guard lock{mutex_};
+
+    tasks_.emplace(std::move(task));
+    workers_.addTask();
+}
+
+void
+TaskQueue::processTask(int instance)
+{
+    std::function<void()> task;
+
+    {
+        std::lock_guard lock{mutex_};
+        assert(!tasks_.empty());
+
+        task = std::move(tasks_.front());
+        tasks_.pop();
+    }
+
+    task();
+}
+
+}  // namespace NodeStore
+}  // namespace ripple

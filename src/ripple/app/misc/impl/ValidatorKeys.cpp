@@ -20,8 +20,8 @@
 #include <ripple/app/misc/ValidatorKeys.h>
 
 #include <ripple/app/misc/Manifest.h>
-#include <ripple/basics/base64.h>
 #include <ripple/basics/Log.h>
+#include <ripple/basics/base64.h>
 #include <ripple/core/Config.h>
 #include <ripple/core/ConfigSections.h>
 
@@ -39,18 +39,20 @@ ValidatorKeys::ValidatorKeys(Config const& config, beast::Journal j)
 
     if (config.exists(SECTION_VALIDATOR_TOKEN))
     {
-        if (auto const token = ValidatorToken::make_ValidatorToken(
+        // token is non-const so it can be moved from
+        if (auto token = loadValidatorToken(
                 config.section(SECTION_VALIDATOR_TOKEN).lines()))
         {
-            auto const pk = derivePublicKey(
-                KeyType::secp256k1, token->validationSecret);
+            auto const pk =
+                derivePublicKey(KeyType::secp256k1, token->validationSecret);
             auto const m = deserializeManifest(base64_decode(token->manifest));
 
-            if (! m || pk != m->signingKey)
+            if (!m || pk != m->signingKey)
             {
                 configInvalid_ = true;
                 JLOG(j.fatal())
-                    << "Invalid token specified in [" SECTION_VALIDATOR_TOKEN "]";
+                    << "Invalid token specified in [" SECTION_VALIDATOR_TOKEN
+                       "]";
             }
             else
             {
@@ -74,8 +76,8 @@ ValidatorKeys::ValidatorKeys(Config const& config, beast::Journal j)
         if (!seed)
         {
             configInvalid_ = true;
-            JLOG(j.fatal()) <<
-                "Invalid seed specified in [" SECTION_VALIDATION_SEED "]";
+            JLOG(j.fatal())
+                << "Invalid seed specified in [" SECTION_VALIDATION_SEED "]";
         }
         else
         {
